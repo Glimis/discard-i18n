@@ -101,3 +101,7 @@ function checkedKey(py_zh,vs,num){
         return vs+num;
     }
  }
+
+
+
+module.exports = main;
