@@ -12,11 +12,10 @@ var paths=[],//所有文件
 
 function main(src){
     //将需要扫描文件名,读取至paths中
-    readdir(path.join(__dirname,src));
+    readdir(src);
     _.each(paths,function(src){
         readFile(src);
     })
-
 }
 
 //获取所有中文后
