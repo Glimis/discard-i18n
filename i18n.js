@@ -1,7 +1,7 @@
 var fs = require('fs'),
     path = require('path'),
     _ = require('lodash'),
-    firstLetter= require('./FirstLetter');
+    firstLetter= require('firstletter');
 var zhReg=/[\u4e00-\u9fa5]+/g;    
 
     

@@ -11,5 +11,9 @@
     "url": "http://git.yonyou.com/liuchyg/i18n.git"
   },
   "author": "",
-  "license": "ISC"
+  "license": "ISC",
+  "dependencies": {
+    "firstletter": "github:glimis/firstletter",
+    "lodash": "^4.17.4"
+  }
 }
