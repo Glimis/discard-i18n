@@ -33,7 +33,7 @@ var callback=_.after(paths.length, function(){
         zh_pys[k]=py;
     });
     //写入字典
-    fs.writeFile('i18n.json',JSON.stringify(py_zhs,0,4));
+    fs.writeFile(path.join(src,'../locale/i18n.json'),JSON.stringify(py_zhs,0,4));
     //修改中文
     _.each(paths,zh2seat)
 })
