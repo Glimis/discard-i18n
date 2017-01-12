@@ -4,7 +4,17 @@ var fs = require('fs'),
     _ = require('lodash'),
     firstLetter= require('firstletter');
 var zhReg=/[\u4e00-\u9fa5]+/g;    
-var fetch =require('node-fetch')
+var fetch =require('node-fetch');
+
+const config={
+    src:'',//扫描文件地址
+    dic:'',//字典地址
+    type:['html','js'],
+    locale:['en'],
+    translate:false
+}
+
+
 /**
  * 同步读取文件夹
  */
@@ -32,183 +42,230 @@ function readdir(src,paths){
 }
 
 
-/**
- * 读取文件
- */
-function readFile(src,c){
-
-    fs.readFile(src,'utf-8',function(e,data){
-       //提取中文
-       zhArrays.push(data.match(zhReg));
-       c();
-    })
-}
-
-//获取不重复拼音
-function getPy(py_zh,vs,num){
-    //原生拼音
-    if(_.isArray(vs)){
-        var py= _.find(vs,function(v){
-            return !py_zh[v];
-        })   
-        if(!py){
-            return getPy(py_zh,vs[0],1)
-        }else{
-            return py;
-        }
-    }
-
-    if(py_zh[vs+num]){
-        return getPy(py_zh,vs[0],num+1)
-    }else{
-        return vs+num;
-    }
- }
-
-
-
-function  scanWord(src,zhArrays,cb){
-    fs.readFile(src,'utf-8',function(e,data){
-       //提取中文
-       zhArrays.push(data.match(zhReg));
-       cb();
-    })
-}
-
-//通过src,字典,创建i18文件
-function createI18nfile(src,zh_pys,py_zhs,locale){
-    fs.readFile(src,'utf-8',function(e,text){
-        _.each(locale,function(local){
-            var newtext=text.replace(zhReg,function(val){
-                //如果不存在,使用原来的数据
-                if(val=="添加外部专家"){
-                    console.log(zh_pys[val],py_zhs[zh_pys[val]],local,py_zhs[zh_pys[val]][local])
-                }
-               return py_zhs[zh_pys[val]][local]||val;
-            })
-            //拼写新的地址
-            var ps=src.split('.');
-            ps[ps.length]=ps[ps.length-1];
-            ps[ps.length-2]=local;
-            //写入
-            fs.writeFile(ps.join('.'),newtext)
-        })
-
-    })
-}
 
 class i18n {
-    //创建字典，flag->true,写入config.dic中
-    static makeDic(flag){
+    //获取需要扫描的文件夹
+    //同步获取,不包含失败
+    static scanFile(src){
         return new Promise(function(resolve, reject) {
-            var paths=[],//所有文件
-                zhArrays=[],//所有中文
-                py_zhs={},//拼音对应的中文
-                zh_pys={};//中文对应的拼音   
-            //同步获取需要扫描的文件    
-            readdir(i18n.config.src, paths);
-            console.log('扫描文件'+paths.length+"个");           
-            var cb=_.after(paths.length,function(){
-                     var arrays=_.union.apply(this,zhArrays);
-                     console.log('获取中文单词'+arrays.length+"个")
-                     //获取第一种中文转拼音
-                     var zh_py=_.chain(arrays).mapKeys().mapValues(firstLetter).value();
-                     _.each(zh_py,function(vs,k){
-                                //获取不重复拼音
-                                var py=getPy(py_zhs,vs);
-                                py_zhs[py]={
-                                    zh:k
-                                }
-                                zh_pys[k]=py;
-                            });
-                     if(flag){
-                        i18n.writeDic(py_zhs)
-                            .then(function(py_zhs){
-                                 resolve({
-                                        zh_pys:zh_pys,
-                                        py_zhs:py_zhs,
-                                        paths:paths
-                                     });
-                            })
-                     }else{
-                         resolve({
-                            zh_pys:zh_pys,
-                            py_zhs:py_zhs,
-                            paths:paths
-                         });
-                     }
-                });
-            _.each(paths,function(src){
-                scanWord(src,zhArrays,cb);
+            var paths=[];
+            readdir(src,paths);
+            console.log('获取文件'+paths.length+"个");
+            resolve(paths);
+        });
+    }
+    //通过文件名扫描中文单词
+    static scanWordByFile(filePath){
+        return new Promise(function(resolve, reject) {
+            fs.readFile(filePath,'utf-8',function(e,data){
+                if(e){
+                    reject(e);
+                }else{
+                    resolve(data.match(zhReg));
+               }
             })
         });
     }
-    //数据合并字典
-    static writeDic(data){
+    //批量扫描,获取中文单词
+    //不包含失败,返回[]
+    static scanWordByFiles(filePaths){
         return new Promise(function(resolve, reject) {
-            var src=i18n.config.dic;
-            fs.readFile(src,'utf-8',function(e,olddata){
-                var olddata=JSON.parse(olddata);
-                var num=0;
-                var newdata=_.mapValues(data,function(v,k){
-                    var d=_.extend(_.get(olddata,k),v);
-                    !d.en||num++;
-                    return d;
+            var arrays=[];
+            //扫描完成后,合并并返回
+            var callback=_.after(filePaths.length,function(){
+                var allWords=_.union.apply(this,arrays);
+                resolve(allWords);
+            })
+            _.each(filePaths,function(filePath){
+                i18n.scanWordByFile(filePath)
+                    .then(function(data){
+                        arrays.push(data);
+                        callback();
+                    })
+                    .catch(callback)
+            })
+        });
+    }
+    //中文转英文/字典
+    //不包含失败,返回{}
+    static word2dit(words){
+        return new Promise(function(resolve, reject) {
+            var data=_.chain(words).mapKeys().mapValues(function(){return ''}).value()
+            //翻译
+            resolve(data);
+        });
+    }
+    //字典数据+字典地址数据合并
+    //中文为关键字,以最新Value为准
+    static unionDit(ndit,src){
+        return new Promise(function(resolve, reject) {
+            i18n.readDit(src)
+                .then(function(odit){
+                    //此处包含新字典与老字典重复,且新字典没有翻译
+                    var dt=_.extend({},odit,ndit);
+                    //参考老字典
+                    _.each(odit,function(v,k){
+                        dt[k]=dt[k]||v;
+                    })
+                    resolve(dt);
+                })
+        });
+    }
+
+    //读取字典文件
+    static readDit(src){
+        return new Promise(function(resolve, reject) {
+            fs.readFile(src,'utf-8',function(e,data){
+                if(e){
+                    resolve({});  
+                }else{
+                    var d={};
+                    try{
+                        d=JSON.parse(data);    
+                    }catch(e){
+
+                    }
+                    resolve(d);
+                }
+            })
+        });
+    }
+    //写入字典
+    static writeDit(dit,src){
+        return new Promise(function(resolve, reject) {
+            fs.writeFile(src,JSON.stringify(dit,0,4),function(e,data){
+                if(e){
+                    console.log(e);
+                    reject(e);
+                }else{
+                    resolve(dit)
+                }
+            })
+        }); 
+    }
+    //批量转换文件
+    static createLocalFilesByDit(filePaths,dit,getFilePath){
+
+        if(_.isString(dit)){
+            return  new Promise(function(resolve, reject) {
+                     i18n.readDit(dit)
+                        .then(function(data){
+                            i18n.createLocalFilesByDit(filePaths,data,getFilePath)
+                                .then(function(data){
+                                    resolve(data);
+                                })
+                        })
+                    })
+
+        }else{
+            return new Promise(function(resolve, reject) {
+                var arrays=[];
+                var callback=_.after(filePaths.length,function(){
+                    var data=_.union.apply(this,arrays);
+                    console.log('包含'+data.length+"条中文,并未进行翻译");
+                    resolve(_.union.apply(this,arrays));
                 })
 
-
-               //自动生成翻译
-                 if(i18n.config.translate){
-                    var cb=_.after(num,function(){
-                        fs.writeFile(src,JSON.stringify(newdata,0,4));
-                        resolve(newdata);
-                    })
-                    _.each(newdata,function(v,k){
-                        if(!v.en){
-                         fetch('http://fanyi.youdao.com/openapi.do?keyfrom=glimis123123&key=243950541&type=data&doctype=json&version=1.1&q='+v.zh)
-                            .then(function(res){
-                                return res.json();
-                            })
-                            .then(function(data){ 
-                                newdata[v].en=data.translation
-                                cb();
-                            }) 
-                            .catch(function(){
-                                cb();
-                            })
-                        }
-                    })
-                       
-
-                 }else{
-                    fs.writeFile(src,JSON.stringify(newdata,0,4));
-                    resolve(newdata);
-                }
-                
-            })
-        })
-    }
-    //生成文件
-    static exec(){
-        //初始化数据
-        if(!i18n.config.type){
-            i18n.config.type=['html','js','ejs'];
+                _.each(filePaths,function(filePath){
+                    i18n.createLocalFileByDit(filePath,dit,getFilePath)
+                        .then(function(data){
+                            arrays.push(data);
+                            callback();
+                        })
+                        
+                })
+            }); 
         }
-        // 生成字典
-        i18n.makeDic(true)
-            .then(function(obj){
-                var py_zhs=obj.py_zhs,zh_pys=obj.zh_pys,paths=obj.paths;
-                _.each(paths,_.partial(createI18nfile,_,zh_pys,py_zhs,i18n.config.locale));
-            })
 
     }
+    //根据字典信息,翻译文件
+    static createLocalFileByDit(filePath,dit,getFilePath){
+            return new Promise(function(resolve, reject) {
+                var array=[];
+                fs.readFile(filePath,'utf-8',function(e,data){
+                        if(e){
+                            resolve([]);
+                        }else{
+                           var text=data.replace(zhReg,function(v){
+                                //转换为英文,如果没有,依然使用中文
+                                if(dit[v]){
+                                    return dit[v];
+                                }else{
+                                    array.push(v);
+                                    return v;    
+                                }
+                           })
+                           var _ps="";
+                            if(getFilePath){
+                                _ps= getFilePath(filePath);
+                            }else{
+                            var ps= filePath.split('.') ;
+                                ps[ps.length]=ps[ps.length-1];
+                                ps[ps.length-2]="en";
+                                _ps=ps.join('.');
+                            }
+                            
+                            fs.writeFile(_ps,text)
+                            resolve(array);
+                       }
+                    })
+            }); 
+    }
+
+    static getConfig(key){
+        return _.extend({},config,i18n.config)[key];
+    }
+    //创建字典
+    static makeDit(){
+        var config=_.extend({},config,i18n.config),
+            dist=config.dist,
+            dic=config.dic;
+        i18n.scanFile(dist)
+          //获取中文单词
+          .then(i18n.scanWordByFiles)
+          //翻译
+          .then(i18n.word2dit)
+          //合并
+          .then(_.partial(i18n.unionDit,_,dic))
+          //注入
+          .then(_.partial(i18n.writeDit,_,dic))
+          .then(function(data){
+              console.log("写入字典完成")
+          })
+          .catch(function(e){
+            console.log(e)
+          })
+    }
+    //生成多文件
+    static exec(){
+        var config=_.extend({},config,i18n.config),
+            dist=config.dist,
+            dic=config.dic;
+         i18n.scanFile(dist)
+              .then(_.partial(i18n.createLocalFilesByDit,_,dic))
+              .then(function(data){
+
+              })
+    }
+    //好危险的样子
+    static change(){
+        var config=_.extend({},config,i18n.config),
+            src=config.src,
+            dic=config.dic;
+
+             i18n.scanFile(src)
+                  .then(_.partial(i18n.createLocalFilesByDit,_,dic,function(v){
+                    return v
+                  }))
+                  .then(function(data){
+                     console.log('使用git checkout . 进行还原')
+                  })
+       
+    }
+
 }
 
-i18n.config={
-        type:['html','js','ejs'],
-        src:"src",
-        dic:"i18n.json"
-    }
+
 
 module.exports = i18n;
 
