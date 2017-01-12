@@ -3,7 +3,8 @@ var fs = require('fs'),
     path = require('path'),
     _ = require('lodash'),
     firstLetter= require('firstletter');
-var zhReg=/[\u4e00-\u9fa5]+/g;    
+    //必须中文开头,可以包含数字,字母,符号,以及中文
+var zhReg=/[\u4e00-\u9fa5]+[\u4e00-\u9fa5_a-zA-Z0-9_。？！、，]*/g;    
 var fetch =require('node-fetch');
 
 const config={
