@@ -24,17 +24,10 @@ function readdir(src,paths){
     _.each(data,function(filename){
         var _path=path.join(src,filename);
         if(fs.statSync(_path).isFile()){
-            var as=_path.split('.');
-            //xxx.en.html,略
-            if(as.length>2){
-                return;
-            }
-            //存在类型中
-            if(_.indexOf(i18n.config.type,_.last(as))>-1){
+            if(i18n.checkedFile(_path)){
                 //文件,加入paths中
                 paths.push(_path);
             }
-            //
         }else{
             //文件夹
             readdir(_path,paths);
@@ -45,6 +38,14 @@ function readdir(src,paths){
 
 
 class i18n {
+    //文件名是否符合
+    static checkedFile(src){
+        var as=src.split('.');
+        if(as.length>2){
+            return false;
+        }
+        return _.indexOf(i18n.getConfig('type'),_.last(as))>-1;
+    }
     //获取需要扫描的文件夹
     //同步获取,不包含失败
     static scanFile(src){
@@ -62,10 +63,13 @@ class i18n {
                 if(e){
                     reject(e);
                 }else{
-                    resolve(data.match(zhReg));
+                    resolve(i18n.scanWordByText(data));
                }
             })
         });
+    }
+    static scanWordByText(text){
+        return text.match(zhReg);
     }
     //批量扫描,获取中文单词
     //不包含失败,返回[]
@@ -99,6 +103,7 @@ class i18n {
     //字典数据+字典地址数据合并
     //中文为关键字,以最新Value为准
     static unionDit(ndit,src){
+        
         return new Promise(function(resolve, reject) {
             i18n.readDit(src)
                 .then(function(odit){
@@ -115,6 +120,9 @@ class i18n {
 
     //读取字典文件
     static readDit(src){
+        if(!src){
+            src=i18n.config.dic;
+        }
         return new Promise(function(resolve, reject) {
             fs.readFile(src,'utf-8',function(e,data){
                 if(e){
@@ -133,6 +141,7 @@ class i18n {
     }
     //写入字典
     static writeDit(dit,src){
+        
         return new Promise(function(resolve, reject) {
             fs.writeFile(src,JSON.stringify(dit,0,4),function(e,data){
                 if(e){
@@ -213,6 +222,60 @@ class i18n {
             }); 
     }
 
+    static createLocalFileByHtml(html,dit){
+        return html.replace(zhReg,function(v){
+                //转换为英文,如果没有,依然使用中文
+                    if(dit[v]){
+                        return dit[v];
+                    }else{
+                        return v;    
+                    }
+                })
+    }
+    //根据字典信息,翻译文件
+    static createLocalFileByHtmls(htmlObjects,dit,getFilePath){
+            if(!dit){
+                return i18n.readDit()
+                    .then(function(dit){
+                        return i18n.createLocalFileByHtmls(htmlObjects,dit)
+                    })
+            }
+            return new Promise(function(resolve, reject) {
+                var array=[];
+                
+                var rs=_.map(htmlObjects,function(htmlObject){
+                    
+                    var filePath=htmlObject.fileName;
+                    var text=htmlObject.html.replace(zhReg,function(v){
+                    //转换为英文,如果没有,依然使用中文
+                        if(dit[v]){
+                            return dit[v];
+                        }else{
+                            array.push(v);
+                            return v;    
+                        }
+                    })
+                    var _ps="";
+                    if(getFilePath){
+                        _ps= getFilePath(filePath);
+                    }else{
+                    var ps= filePath.split('.') ;
+                        ps[ps.length]=ps[ps.length-1];
+                        ps[ps.length-2]="en";
+                        _ps=ps.join('.');
+                    }
+                  
+                    return {
+                        fileName:_ps,
+                        html:text
+                    }
+                })
+               console.log();
+                console.log(array.length+"个词条,没有进行翻译");
+
+                resolve(rs);
+            }); 
+    }
     static getConfig(key){
         return _.extend({},config,i18n.config)[key];
     }
@@ -231,7 +294,30 @@ class i18n {
           //注入
           .then(_.partial(i18n.writeDit,_,dic))
           .then(function(data){
-              console.log("写入字典完成")
+              var dt=_.values(data),len=dt.length;
+              console.log('获取'+len+"条中文")
+              console.log('其中'+(len-_.compact(dt).length)+"条没有进行翻译")
+              console.log("可在"+dic+"中进行查看")
+          })
+          .catch(function(e){
+            console.log(e)
+          })
+    }
+    //通过中文[[中],[文]],获取字典
+static makeDitByWords(arrays){
+        var config=_.extend({},config,i18n.config),
+            dist=config.dist,
+            dic=config.dic;
+        var allWords=_.union.apply(this,arrays);
+        console.log('获取中文单词'+allWords.length+"个");
+        i18n.word2dit(allWords)
+          .then(_.partial(i18n.unionDit,_,dic))
+          .then(_.partial(i18n.writeDit,_,dic))
+          .then(function(data){
+              var dt=_.values(data),len=dt.length;
+              console.log('获取'+len+"条中文")
+              console.log('其中'+(len-_.compact(dt).length)+"条没有进行翻译")
+              console.log("可在"+dic+"中进行查看")
           })
           .catch(function(e){
             console.log(e)
